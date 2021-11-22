@@ -1,0 +1,233 @@
+---
+name: Ansible Collection Workflow
+on:
+  workflow_call:
+    inputs:
+      ansible-core-version:
+        default:
+        description: Array of ansible versions
+        required: false
+        type: string
+      docker-exclude:
+        default:
+        description: Array of matrix excludes for docker
+        required: false
+        type: string
+      docker-image:
+        default:
+        description: Array of docker images
+        required: false
+        type: string
+      docker-include:
+        default:
+        description: Array of matrix includes for docker
+        required: false
+        type: string
+      fail-fast:
+        default: true
+        description: GitHubAction parameter for jobs strategy
+        required: false
+        type: boolean
+      pre-test-cmd:
+        default:
+        description: Parameter for action paths-filter
+        required: false
+        type: string
+      python-version:
+        default:
+        description: Array of python versions (controler)
+        required: false
+        type: string
+      runs-on:
+        default: 'ubuntu-latest'
+        description: docker image to run GHA
+        type: string
+        required: false
+      target-python-exclude:
+        default:
+        description: Array of excludes target python versions
+        required: false
+        type: string
+      target-python-version:
+        default:
+        description: Array of target python versions (managed)
+        required: false
+        type: string
+      test-docker:
+        default: true
+        description: Test on all docker images
+        type: boolean
+        required: false
+      test-python:
+        default: true
+        description: Test on all python versions (target)
+        type: boolean
+        required: false
+      testing-type:
+        default: integration
+        description: Parameter for ansible-test-gh-action
+        type: string
+        required: true
+
+jobs:
+  licence:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - run: >
+        echo -e "
+        \tansible-collection-gh-workflow \n
+        \tCopyright (C) 2021 Cédric Villemain ( https://Data-Bene.io) \n
+        \tThis program comes with ABSOLUTELY NO WARRANTY. \n
+        \tThis is free software, and you are welcome to redistribute it \n
+        \tunder certain conditions. \n"
+      shell: bash
+
+  define-matrix:
+    outputs:
+      ansible-core-version: ${{ steps.default-matrix.outputs.ansible-core-version }}
+      docker-exclude: ${{ steps.default-matrix.outputs.docker-exclude }}
+      docker-image: ${{ steps.default-matrix.outputs.docker-image }}
+      docker-include: ${{ steps.default-matrix.outputs.docker-include }}
+      python-version: ${{ steps.default-matrix.outputs.python-version }}
+      target-python-exclude: ${{ steps.default-matrix.outputs.target-python-exclude }}
+      target-python-version: ${{ steps.default-matrix.outputs.target-python-version }}
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - uses: data-bene/ansible-test-versions-gh-action@release/v1
+      id: default-matrix
+      with:
+        ansible-core-version: ${{ inputs.ansible-core-version }}
+        docker-exclude: ${{ inputs.docker-exclude }}
+        docker-image: ${{ inputs.docker-image }}
+        docker-include: ${{ inputs.docker-include }}
+        python-version: ${{ inputs.python-version }}
+        target-python-exclude: ${{ inputs.target-python-exclude }}
+        target-python-version: ${{ inputs.target-python-version }}
+
+  plugins:
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      modules: ${{ steps.find.outputs.modules }}
+      module_utils: ${{ steps.find.outputs.module_utils }}
+      targets: ${{ steps.find.outputs.targets }}
+      nottargets: ${{ steps.find.outputs.nottargets }}
+      filters: ${{ steps.find.outputs.filters }}
+      test-deps: ${{ steps.deps.outputs.test-deps }}
+    steps:
+    - uses: actions/checkout@v2
+      if: ${{ github.event_name != 'pull_request' }}
+    # Return list of modules, module_utils, ...
+    - name: Open an expandable block of code
+      run: >-
+        echo ::group::Find modules and module_utils
+      shell: bash
+    - name: Find modules and module_utils
+      id: find
+      # it might be in its own GHA repo instead of here, but for the moment it works.
+      run: >-
+        echo Finding files...
+        ; files=($(basename -a $(find ./plugins/modules/*.py -type f)))
+        ; modules=${files[@]%.py}
+        ; echo "Modules: ${modules}"
+        ; echo "::set-output name=modules::${modules}"
+        ; files=($(basename -a $(find ./plugins/module_utils/*.py -type f)))
+        ; module_utils=${files[@]%.py}
+        ; echo "Module_utils: ${module_utils}"
+        ; echo "::set-output name=module_utils::${module_utils}"
+        ; dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -exec test -e '{}'/aliases \; -printf '%f '))
+        ; targets=${dirs[@]}
+        ; echo "Targets: ${targets}"
+        ; echo "::set-output name=targets::${targets}"
+        ; dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -not -exec test -e '{}'/aliases \;  -printf "%p "))
+        ; nottargets=("${dirs[@]/%/\/**}")
+        ; echo "Nottargets: ${nottargets[@]}"
+        ; echo "::set-output name=nottargets::${nottargets[@]}"
+        ; filters=
+        ; for m in ${modules}
+        ;  do l=("plugins/modules/$m.py" "tests/integration/targets/$m/**" "plugins/module_utils/**") l+=("${nottargets[@]}") filters+="$m:$(jq --compact-output --null-input '$ARGS.positional' --args "${l[@]}"),"
+        ;  done
+        ; filters="{${filters%?}}"
+        ; echo "Filters: ${filters}"
+        ; echo "::set-output name=filters::${filters}"
+      shell: bash
+    - name: Find dependencies of tested modules
+      id: deps
+      run: >-
+        echo Find requirements
+        ; testdeps=$(yq eval --no-colors --no-doc '.integration_tests_dependencies[]' tests/requirements.yml)
+        ; echo "Test-deps: ${testdeps}"
+        ; echo "::set-output name=test-deps::${testdeps}"
+      shell: bash
+    - name: Close an expandable block of code
+      run: >-
+        echo ::endgroup::
+      shell: bash
+
+  changes:
+    needs: plugins
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      targets: ${{ steps.filter.outputs.changes }}
+    steps:
+    - uses: actions/checkout@v2
+      if: ${{ github.event_name != 'pull_request' }}
+    # Run change detection to build tests jobs
+    - uses: dorny/paths-filter@v2
+      id: filter
+      with:
+        filters: ${{ needs.plugins.outputs.filters }}
+
+  test-python:
+    if: inputs.test-python
+    name: "${{ matrix.target-python-version }} | ${{ matrix.ansible-core-version }} | ${{ matrix.python-version }}"
+    needs:
+    - changes
+    - define-matrix
+    - plugins
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - name: "ansible-test ${{ inputs.testing-type }} ${{ join(fromJSON(needs.changes.outputs.targets), ' ') }}"
+      uses: ansible-community/ansible-test-gh-action@release/v1.3
+      with:
+        ansible-core-version: ${{ matrix.ansible-core-version }}
+        pre-test-cmd: ${{ inputs.pre-test-cmd }}
+        python-version: ${{ matrix.python-version }}
+        target: ${{ join(fromJSON(needs.changes.outputs.targets), ' ') }}
+        target-python-version: ${{ matrix.target-python-version }}
+        testing-type: ${{ inputs.testing-type }}
+        test-deps: ${{ needs.plugins.outputs.test-deps }}
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        ansible-core-version: ${{ fromJSON(needs.define-matrix.outputs.ansible-core-version) }}
+        python-version: ${{ fromJSON(needs.define-matrix.outputs.python-version) }}
+        target-python-version: ${{ fromJSON(needs.define-matrix.outputs.target-python-version) }}
+        exclude: ${{ fromJSON(needs.define-matrix.outputs.target-python-exclude) }}
+
+  test-docker:
+    if: inputs.test-docker && inputs.testing-type != 'sanity'
+    name: "${{ matrix.docker-image }} | ${{ matrix.ansible-core-version }} | ${{ matrix.python-version }}"
+    needs:
+    - changes
+    - define-matrix
+    - plugins
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - name: "ansible-test ${{ inputs.testing-type }} ${{ join(fromJSON(needs.changes.outputs.targets), ' ') }}"
+      uses: ansible-community/ansible-test-gh-action@release/v1.3
+      with:
+        ansible-core-version: ${{ matrix.ansible-core-version }}
+        docker-image: ${{ matrix.docker-image }}
+        pre-test-cmd: ${{ inputs.pre-test-cmd }}
+        python-version: ${{ matrix.python-version }}
+        target: ${{ join(fromJSON(needs.changes.outputs.targets), ' ') }}
+        testing-type: ${{ inputs.testing-type }}
+        test-deps: ${{ needs.plugins.outputs.test-deps }}
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        ansible-core-version: ${{ fromJSON(needs.define-matrix.outputs.ansible-core-version) }}
+        python-version: ${{ fromJSON(needs.define-matrix.outputs.python-version) }}
+        docker-image: ${{ fromJSON(needs.define-matrix.outputs.docker-image) }}
+        exclude: ${{ fromJSON(needs.define-matrix.outputs.docker-exclude) }}
+        include: ${{ fromJSON(needs.define-matrix.outputs.docker-include) }}
