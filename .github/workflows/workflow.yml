@@ -115,7 +115,6 @@ jobs:
       test-deps: ${{ steps.deps.outputs.test-deps }}
     steps:
     - uses: actions/checkout@v2
-      if: ${{ github.event_name != 'pull_request' }}
     # Return list of modules, module_utils, ...
     - name: Open an expandable block of code
       run: >-
@@ -170,7 +169,6 @@ jobs:
       targets: ${{ steps.filter.outputs.changes }}
     steps:
     - uses: actions/checkout@v2
-      if: ${{ github.event_name != 'pull_request' }}
     # Run change detection to build tests jobs
     - uses: dorny/paths-filter@v2
       id: filter
