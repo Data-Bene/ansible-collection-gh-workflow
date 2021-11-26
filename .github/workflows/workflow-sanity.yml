@@ -1,43 +1,44 @@
 ---
 name: Ansible Collection Workflow for "ansible-test sanity"
+# This reusable workflow runs ansible-test sanity. By default it will run on all
+# ansible stable versions and ansible devel.
+# ansible-test allows to detect changes to trigger testing only on relevant test
+# targets but the community action for GHA does not implement it yet so this
+# workflow does this part of the job.
+# Inputs parameters are described below.
 on:
   workflow_call:
     inputs:
       ansible-core-version:
         default:
-        description: Array of ansible versions
+        description: |
+          JSON Array of ansible versions to test the collection
+          Default to all stable versions and devel
+          Example:
+          ansible-core-version: '[ "stable-2.12", "devel" ]'
         required: false
         type: string
       fail-fast:
         default: true
-        description: GitHubAction parameter for jobs strategy
+        description: github action parameter for jobs strategy
         required: false
         type: boolean
       runs-on:
         default: 'ubuntu-latest'
-        description: docker image to run GHA
+        description: github docker image to run this workflow
         type: string
         required: false
-      target-python-exclude:
-        default:
-        description: Array of excludes target python versions
-        required: false
-        type: string
-      target-python-version:
-        default:
-        description: Array of target python versions (managed)
-        required: false
-        type: string
 
 jobs:
   prepare:
     outputs:
       ansible-core-version: ${{ steps.vars.outputs.ansible-core-version }}
-      targets: ${{ steps.find.outputs.targets }}
+      targets: ${{ steps.filter.outputs.changes }}
       test-deps: ${{ steps.deps.outputs.test-deps }}
     runs-on: ${{ inputs.runs-on }}
     steps:
-    - uses: data-bene/ansible-test-versions-gh-action@devel
+    - name: Get variables to build matrix
+      uses: data-bene/ansible-test-versions-gh-action@devel
       id: vars
       with:
         ansible-core-version: ${{ inputs.ansible-core-version }}
@@ -46,52 +47,53 @@ jobs:
 
     - name: Build modules list and filtering rules
       id: find
-      # it might be in its own GHA repo instead of here, but for the moment it works.
       run: |
         echo ::group::Find modules, module_utils, build filters
+
+        # Build list of modules
         files=($(basename -a $(find ./plugins/modules/*.py -type f)))
         modules=${files[@]%.py}
         echo "::notice title=Modules::${modules}"
         echo "::set-output name=modules::${modules}"
-        files=($(basename -a $(find ./plugins/module_utils/*.py -type f)))
-        module_utils=${files[@]%.py}
-        echo "::notice title=Module_utils::${module_utils}"
-        echo "::set-output name=module_utils::${module_utils}"
-        dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -exec test -e '{}'/aliases \; -printf '%f '))
-        targets=${dirs[@]}
-        echo "::debug title=Targets::${targets}"
-        echo "::set-output name=targets::${targets}"
-        dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -not -exec test -e '{}'/aliases \;  -printf "%p "))
-        nottargets=("${dirs[@]/%/\/**}")
-        echo "::debug title=Nottargets::${nottargets[@]}"
-        echo "::set-output name=nottargets::${nottargets[@]}"
+
+        # Build filters for dorny/paths-filter action
         filters=
         for m in ${modules} ; do
-          l=("plugins/modules/$m.py" "tests/integration/targets/$m/**" "plugins/module_utils/**") l+=("${nottargets[@]}") filters+="$m:$(jq --compact-output --null-input '$ARGS.positional' --args "${l[@]}")," ;
+          l=("plugins/modules/$m.py" "plugins/module_utils/**") ;
+          filters+="$m:$(jq --compact-output --null-input '$ARGS.positional' --args "${l[@]}")," ;
         done
         filters="{${filters%?}}"
         echo "::debug title=Filters::${filters}"
         echo "::set-output name=filters::${filters}"
+
         echo ::endgroup::
       shell: bash
+
     - name: Find dependencies of tested modules
       id: deps
       run: |
         echo ::group::Find requirements
-        testdeps=$(yq eval --no-colors --no-doc '.integration_tests_dependencies[]' tests/requirements.yml)
+
+        testdeps=$(\
+          yq eval --no-colors --no-doc \
+                 '.integration_tests_dependencies[]' \
+                 tests/requirements.yml\
+                 )
         echo "::notice title=Test-deps::${testdeps}"
         echo "::set-output name=test-deps::${testdeps}"
+
         echo ::endgroup::
       shell: bash
 
     # Run change detection to build tests jobs
-    - uses: dorny/paths-filter@v2
+    - name: Use the filters to detect changes (and thus test targets)
+      uses: dorny/paths-filter@v2
       id: filter
       with:
         filters: ${{ steps.find.outputs.filters }}
 
-  test-python:
-    name: "${{ matrix.ansible-core-version }}"
+  run:
+    name: "Ⓐ: ${{ matrix.ansible-core-version }}"
     needs:
     - prepare
     runs-on: ${{ inputs.runs-on }}
@@ -101,9 +103,10 @@ jobs:
       with:
         ansible-core-version: ${{ matrix.ansible-core-version }}
         target: ${{ needs.prepare.outputs.targets }}
-        testing-type: sanity
         test-deps: ${{ needs.prepare.outputs.test-deps }}
+        testing-type: sanity
     strategy:
       fail-fast: ${{ inputs.fail-fast }}
       matrix:
-        ansible-core-version: ${{ fromJSON(needs.prepare.outputs.ansible-core-version) }}
+        ansible-core-version: >-
+          ${{ fromJSON(needs.prepare.outputs.ansible-core-version) }}
