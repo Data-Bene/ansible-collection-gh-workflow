@@ -108,7 +108,7 @@ jobs:
       uses: ansible-community/ansible-test-gh-action@release/v1.3
       with:
         ansible-core-version: ${{ matrix.ansible-core-version }}
-        target: needs.prepare.outputs.targets)
+        target: ${{ needs.prepare.outputs.targets }}
         target-python-version: ${{ matrix.target-python-version }}
         testing-type: sanity
         test-deps: ${{ needs.prepare.outputs.test-deps }}
