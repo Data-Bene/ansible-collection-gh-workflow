@@ -1,0 +1,90 @@
+---
+name: Ansible Collection Workflow for "ansible-test sanity"
+# This reusable workflow runs ansible-test sanity. By default it will run on all
+# ansible stable versions and ansible devel.
+# ansible-test allows to detect changes to trigger testing only on relevant test
+# targets but the community action for GHA does not implement it yet so this
+# workflow does this part of the job.
+# Inputs parameters are described below.
+on:
+  workflow_call:
+    inputs:
+      ansible-core-version:
+        default:
+        description: |
+          JSON array of ansible versions to test the collection
+          Default to all stable versions and devel
+          Example:
+          ansible-core-version: '[ "stable-2.12", "devel" ]'
+        required: false
+        type: string
+      fail-fast:
+        default: true
+        description: github action parameter for jobs strategy
+        required: false
+        type: boolean
+      runs-on:
+        default: 'ubuntu-latest'
+        description: github docker image to run this workflow
+        required: false
+        type: string
+      targets:
+        default:
+        description: |
+          JSON array of targets for ansible-test sanity
+          Default is empty so that ansible-test run all targets
+          Example:
+          targets: '[ "info", "copy" ]'
+        required: false
+        type: string
+
+jobs:
+  prepare:
+    name: Prepare Matrix
+    outputs:
+      ansible-core-version: ${{ steps.vars.outputs.ansible-core-version }}
+      test-deps: ${{ steps.deps.outputs.test-deps }}
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - name: Get variables to build matrix
+      id: vars
+      uses: data-bene/ansible-test-versions-gh-action@v1
+      with:
+        ansible-core-version: ${{ inputs.ansible-core-version }}
+
+    - uses: actions/checkout@v2
+
+    - name: Find dependencies of modules
+      id: deps
+      run: |
+        echo ::group::Find requirements
+
+        testdeps=$(\
+          yq eval --no-colors --no-doc \
+                 '.integration_tests_dependencies[]' \
+                 tests/requirements.yml\
+                 )
+        echo "::notice title=Test-deps::${testdeps}"
+        echo "::set-output name=test-deps::${testdeps}"
+
+        echo ::endgroup::
+      shell: bash
+
+  run:
+    name: "Ⓐ ${{ matrix.ansible-core-version }}"
+    needs:
+    - prepare
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - name: "Ansible-test sanity ${{ needs.prepare.outputs.targets }}"
+      uses: ansible-community/ansible-test-gh-action@release/v1.3
+      with:
+        ansible-core-version: ${{ matrix.ansible-core-version }}
+        target: ${{ inputs.targets }}
+        test-deps: ${{ needs.prepare.outputs.test-deps }}
+        testing-type: sanity
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        ansible-core-version: >-
+          ${{ fromJSON(needs.prepare.outputs.ansible-core-version) }}
