@@ -109,7 +109,7 @@ jobs:
       with:
         ansible-core-version: ${{ matrix.ansible-core-version }}
         target: ${{ needs.prepare.outputs.targets }}
-        target-python-version: ${{ matrix.target-python-version }}
+        #target-python-version: ${{ matrix.target-python-version }}
         testing-type: sanity
         test-deps: ${{ needs.prepare.outputs.test-deps }}
     strategy:
