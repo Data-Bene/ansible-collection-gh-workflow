@@ -76,7 +76,7 @@ jobs:
       shell: bash
     - name: Find dependencies of tested modules
       id: deps
-      run: >-
+      run: |
         echo ::group::Find requirements
         testdeps=$(yq eval --no-colors --no-doc '.integration_tests_dependencies[]' tests/requirements.yml)
         echo "::notice title=Test-deps::${testdeps}"
