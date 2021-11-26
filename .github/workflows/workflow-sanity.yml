@@ -39,7 +39,7 @@ jobs:
       test-deps: ${{ steps.deps.outputs.test-deps }}
     runs-on: ${{ inputs.runs-on }}
     steps:
-    - uses: data-bene/ansible-test-versions-gh-action@release/v1
+    - uses: data-bene/ansible-test-versions-gh-action@devel
       id: vars
       with:
         ansible-core-version: ${{ inputs.ansible-core-version }}
