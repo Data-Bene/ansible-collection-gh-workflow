@@ -41,55 +41,49 @@ jobs:
       id: vars
       with:
         ansible-core-version: ${{ inputs.ansible-core-version }}
+
     - uses: actions/checkout@v2
-    # Return list of modules, module_utils, ...
-    - name: Open an expandable block of code
-      run: >-
-        echo ::group::Find modules and module_utils
-      shell: bash
+
     - name: Find modules and module_utils
       id: find
       # it might be in its own GHA repo instead of here, but for the moment it works.
       run: >-
-        echo Searching for modules:
+        echo ::group::Find modules, module_utils, build filters
         ; files=($(basename -a $(find ./plugins/modules/*.py -type f)))
         ; modules=${files[@]%.py}
         ; echo "::notice title=Modules::${modules}"
         ; echo "::set-output name=modules::${modules}"
-        ; echo ''
-        ; echo Searching for module_utils:
         ; files=($(basename -a $(find ./plugins/module_utils/*.py -type f)))
         ; module_utils=${files[@]%.py}
-        ; echo "Module_utils: ${module_utils}"
+        ; echo "::notice title=Module_utils::${module_utils}"
         ; echo "::set-output name=module_utils::${module_utils}"
         ; dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -exec test -e '{}'/aliases \; -printf '%f '))
         ; targets=${dirs[@]}
-        ; echo "Targets: ${targets}"
+        ; echo "::debug title=Targets::${targets}"
         ; echo "::set-output name=targets::${targets}"
         ; dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -not -exec test -e '{}'/aliases \;  -printf "%p "))
         ; nottargets=("${dirs[@]/%/\/**}")
-        ; echo "Nottargets: ${nottargets[@]}"
+        ; echo "::debug title=Nottargets::${nottargets[@]}"
         ; echo "::set-output name=nottargets::${nottargets[@]}"
         ; filters=
         ; for m in ${modules}
         ;  do l=("plugins/modules/$m.py" "tests/integration/targets/$m/**" "plugins/module_utils/**") l+=("${nottargets[@]}") filters+="$m:$(jq --compact-output --null-input '$ARGS.positional' --args "${l[@]}"),"
         ;  done
         ; filters="{${filters%?}}"
-        ; echo "Filters: ${filters}"
+        ; echo "::debug title=Filters::${filters}"
         ; echo "::set-output name=filters::${filters}"
+        ; echo ::endgroup::
       shell: bash
     - name: Find dependencies of tested modules
       id: deps
       run: >-
-        echo Find requirements
-        ; testdeps=$(yq eval --no-colors --no-doc '.integration_tests_dependencies[]' tests/requirements.yml)
-        ; echo "Test-deps: ${testdeps}"
-        ; echo "::set-output name=test-deps::${testdeps}"
-      shell: bash
-    - name: Close an expandable block of code
-      run: >-
+        echo ::group::Find requirements
+        testdeps=$(yq eval --no-colors --no-doc '.integration_tests_dependencies[]' tests/requirements.yml)
+        echo "::notice title=Test-deps::${testdeps}"
+        echo "::set-output name=test-deps::${testdeps}"
         echo ::endgroup::
       shell: bash
+
     # Run change detection to build tests jobs
     - uses: dorny/paths-filter@v2
       id: filter
