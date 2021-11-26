@@ -12,7 +12,7 @@ on:
       ansible-core-version:
         default:
         description: |
-          JSON Array of ansible versions to test the collection
+          JSON array of ansible versions to test the collection
           Default to all stable versions and devel
           Example:
           ansible-core-version: '[ "stable-2.12", "devel" ]'
@@ -28,12 +28,20 @@ on:
         description: github docker image to run this workflow
         type: string
         required: false
+      targets:
+        default:
+        description: |
+          JSON array of targets for ansible-test sanity
+          Default is empty so that ansible-test run all targets
+          Example:
+          targets: '[ "info", "copy" ]'
+        type: string
+        required: false
 
 jobs:
   prepare:
     outputs:
       ansible-core-version: ${{ steps.vars.outputs.ansible-core-version }}
-      targets: ${{ steps.filter.outputs.changes }}
       test-deps: ${{ steps.deps.outputs.test-deps }}
     runs-on: ${{ inputs.runs-on }}
     steps:
@@ -45,31 +53,7 @@ jobs:
 
     - uses: actions/checkout@v2
 
-    - name: Build modules list and filtering rules
-      id: find
-      run: |
-        echo ::group::Find modules, module_utils, build filters
-
-        # Build list of modules
-        files=($(basename -a $(find ./plugins/modules/*.py -type f)))
-        modules=${files[@]%.py}
-        echo "::notice title=Modules::${modules}"
-        echo "::set-output name=modules::${modules}"
-
-        # Build filters for dorny/paths-filter action
-        filters=
-        for m in ${modules} ; do
-          l=("plugins/modules/$m.py" "plugins/module_utils/**") ;
-          filters+="$m:$(jq --compact-output --null-input '$ARGS.positional' --args "${l[@]}")," ;
-        done
-        filters="{${filters%?}}"
-        echo "::debug title=Filters::${filters}"
-        echo "::set-output name=filters::${filters}"
-
-        echo ::endgroup::
-      shell: bash
-
-    - name: Find dependencies of tested modules
+    - name: Find dependencies of modules
       id: deps
       run: |
         echo ::group::Find requirements
@@ -85,13 +69,6 @@ jobs:
         echo ::endgroup::
       shell: bash
 
-    # Run change detection to build tests jobs
-    - name: Use the filters to detect changes (and thus test targets)
-      uses: dorny/paths-filter@v2
-      id: filter
-      with:
-        filters: ${{ steps.find.outputs.filters }}
-
   run:
     name: "Ⓐ: ${{ matrix.ansible-core-version }}"
     needs:
@@ -102,7 +79,7 @@ jobs:
       uses: ansible-community/ansible-test-gh-action@release/v1.3
       with:
         ansible-core-version: ${{ matrix.ansible-core-version }}
-        target: ${{ join(fromJSON(needs.prepare.outputs.targets), ' ' }}
+        target: ${{ inputs.targets }}
         test-deps: ${{ needs.prepare.outputs.test-deps }}
         testing-type: sanity
     strategy:
