@@ -99,7 +99,7 @@ jobs:
         filters: ${{ steps.find.outputs.filters }}
 
   test-python:
-    name: "${{ matrix.target-python-version }} | ${{ matrix.ansible-core-version }}"
+    name: "${{ matrix.ansible-core-version }}"
     needs:
     - prepare
     runs-on: ${{ inputs.runs-on }}
@@ -116,5 +116,5 @@ jobs:
       fail-fast: ${{ inputs.fail-fast }}
       matrix:
         ansible-core-version: ${{ fromJSON(needs.prepare.outputs.ansible-core-version) }}
-        target-python-version: ${{ fromJSON(needs.prepare.outputs.target-python-version) }}
-        exclude: ${{ fromJSON(needs.prepare.outputs.target-python-exclude) }}
+        #target-python-version: ${{ fromJSON(needs.prepare.outputs.target-python-version) }}
+        #exclude: ${{ fromJSON(needs.prepare.outputs.target-python-exclude) }}
