@@ -1,0 +1,120 @@
+---
+name: Ansible Collection Workflow for "ansible-test sanity"
+on:
+  workflow_call:
+    inputs:
+      ansible-core-version:
+        default:
+        description: Array of ansible versions
+        required: false
+        type: string
+      fail-fast:
+        default: true
+        description: GitHubAction parameter for jobs strategy
+        required: false
+        type: boolean
+      runs-on:
+        default: 'ubuntu-latest'
+        description: docker image to run GHA
+        type: string
+        required: false
+      target-python-exclude:
+        default:
+        description: Array of excludes target python versions
+        required: false
+        type: string
+      target-python-version:
+        default:
+        description: Array of target python versions (managed)
+        required: false
+        type: string
+
+jobs:
+  prepare:
+    outputs:
+      ansible-core-version: ${{ steps.vars.outputs.ansible-core-version }}
+      target-python-exclude: ${{ steps.vars.outputs.target-python-exclude }}
+      target-python-version: ${{ steps.vars.outputs.target-python-version }}
+      targets: ${{ steps.find.outputs.targets }}
+      test-deps: ${{ steps.deps.outputs.test-deps }}
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - uses: data-bene/ansible-test-versions-gh-action@release/v1
+      id: vars
+      with:
+        ansible-core-version: ${{ inputs.ansible-core-version }}
+        target-python-exclude: ${{ inputs.target-python-exclude }}
+        target-python-version: ${{ inputs.target-python-version }}
+    - uses: actions/checkout@v2
+    # Return list of modules, module_utils, ...
+    - name: Open an expandable block of code
+      run: >-
+        echo ::group::Find modules and module_utils
+      shell: bash
+    - name: Find modules and module_utils
+      id: find
+      # it might be in its own GHA repo instead of here, but for the moment it works.
+      run: >-
+        echo Finding files...
+        ; files=($(basename -a $(find ./plugins/modules/*.py -type f)))
+        ; modules=${files[@]%.py}
+        ; echo "Modules: ${modules}"
+        ; echo "::set-output name=modules::${modules}"
+        ; files=($(basename -a $(find ./plugins/module_utils/*.py -type f)))
+        ; module_utils=${files[@]%.py}
+        ; echo "Module_utils: ${module_utils}"
+        ; echo "::set-output name=module_utils::${module_utils}"
+        ; dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -exec test -e '{}'/aliases \; -printf '%f '))
+        ; targets=${dirs[@]}
+        ; echo "Targets: ${targets}"
+        ; echo "::set-output name=targets::${targets}"
+        ; dirs=($(find ./tests/integration/targets/ -mindepth 1 -maxdepth 1 -type d -not -exec test -e '{}'/aliases \;  -printf "%p "))
+        ; nottargets=("${dirs[@]/%/\/**}")
+        ; echo "Nottargets: ${nottargets[@]}"
+        ; echo "::set-output name=nottargets::${nottargets[@]}"
+        ; filters=
+        ; for m in ${modules}
+        ;  do l=("plugins/modules/$m.py" "tests/integration/targets/$m/**" "plugins/module_utils/**") l+=("${nottargets[@]}") filters+="$m:$(jq --compact-output --null-input '$ARGS.positional' --args "${l[@]}"),"
+        ;  done
+        ; filters="{${filters%?}}"
+        ; echo "Filters: ${filters}"
+        ; echo "::set-output name=filters::${filters}"
+      shell: bash
+    - name: Find dependencies of tested modules
+      id: deps
+      run: >-
+        echo Find requirements
+        ; testdeps=$(yq eval --no-colors --no-doc '.integration_tests_dependencies[]' tests/requirements.yml)
+        ; echo "Test-deps: ${testdeps}"
+        ; echo "::set-output name=test-deps::${testdeps}"
+      shell: bash
+    - name: Close an expandable block of code
+      run: >-
+        echo ::endgroup::
+      shell: bash
+    # Run change detection to build tests jobs
+    - uses: dorny/paths-filter@v2
+      id: filter
+      with:
+        filters: ${{ steps.find.outputs.filters }}
+
+  test-python:
+    name: "${{ matrix.target-python-version }} | ${{ matrix.ansible-core-version }}"
+    needs:
+    - prepare
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+    - name: "ansible-test ${{ inputs.testing-type }} ${{ join(fromJSON(needs.prepare.outputs.targets), ' ') }}"
+      uses: ansible-community/ansible-test-gh-action@release/v1.3
+      with:
+        ansible-core-version: ${{ matrix.ansible-core-version }}
+        target: ${{ join(fromJSON(needs.prepare.outputs.targets), ' ') }}
+        target-python-version: ${{ matrix.target-python-version }}
+        testing-type: sanity
+        test-deps: ${{ needs.prepare.outputs.test-deps }}
+    strategy:
+      fail-fast: ${{ inputs.fail-fast }}
+      matrix:
+        ansible-core-version: ${{ fromJSON(needs.prepare.outputs.ansible-core-version) }}
+        target-python-version: ${{ fromJSON(needs.prepare.outputs.target-python-version) }}
+        exclude: ${{ fromJSON(needs.prepare.outputs.target-python-exclude) }}
