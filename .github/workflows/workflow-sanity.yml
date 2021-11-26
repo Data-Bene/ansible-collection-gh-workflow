@@ -48,7 +48,7 @@ jobs:
     steps:
     - name: Get variables to build matrix
       id: vars
-      uses: data-bene/ansible-test-versions-gh-action@v1
+      uses: data-bene/ansible-test-versions-gh-action@release/v1
       with:
         ansible-core-version: ${{ inputs.ansible-core-version }}
 
