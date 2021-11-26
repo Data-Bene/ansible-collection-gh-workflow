@@ -102,7 +102,7 @@ jobs:
       uses: ansible-community/ansible-test-gh-action@release/v1.3
       with:
         ansible-core-version: ${{ matrix.ansible-core-version }}
-        target: ${{ needs.prepare.outputs.targets }}
+        target: ${{ join(fromJSON(needs.prepare.outputs.targets), ' ' }}
         test-deps: ${{ needs.prepare.outputs.test-deps }}
         testing-type: sanity
     strategy:
