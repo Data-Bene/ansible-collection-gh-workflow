@@ -44,7 +44,7 @@ jobs:
 
     - uses: actions/checkout@v2
 
-    - name: Find modules and module_utils
+    - name: Build modules list and filtering rules
       id: find
       # it might be in its own GHA repo instead of here, but for the moment it works.
       run: |
